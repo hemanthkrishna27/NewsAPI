@@ -1,13 +1,17 @@
 package org.news.api.firebase;
 
-import com.google.firebase.database.DatabaseReference;
-import com.google.firebase.database.FirebaseDatabase;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.reflect.TypeToken;
+import com.google.firebase.database.*;
 import com.google.gson.Gson;
 import org.news.api.rss.NewsItem;
 import org.news.api.rss.TrailerItem;
 import org.news.api.rss.Trivia;
 import org.news.api.rss.Upcoming;
 
+import java.io.IOException;
+import java.lang.reflect.Type;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -15,16 +19,86 @@ import java.net.http.HttpResponse;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 public class FirebaseWriter {
     private static final String DB_URL =
             "https://cinepulse-54397-default-rtdb.asia-southeast1.firebasedatabase.app/";
+
+
+    public void deleteOldNews() throws Exception {
+        String url = DB_URL + "movie_news/data.json"; // base Firebase path
+        HttpClient client = HttpClient.newHttpClient();
+
+        // 1️⃣ Fetch all data
+        HttpRequest getReq = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .GET()
+                .build();
+
+        HttpResponse<String> getRes = client.send(getReq, HttpResponse.BodyHandlers.ofString());
+
+        if (getRes.statusCode() != 200) {
+            throw new RuntimeException("Failed to fetch data: " + getRes.body());
+        }
+
+        // 2️⃣ Parse JSON into a map
+        Type type = new TypeToken<Map<String, NewsItem>>() {}.getType();
+        Map<String, NewsItem> newsMap = new Gson().fromJson(getRes.body(), type);
+
+        if (newsMap == null || newsMap.isEmpty()) {
+            System.out.println("✅ No news to clean up.");
+            return;
+        }
+
+        long now = Instant.now().toEpochMilli();
+        long twoDaysMillis = 2 * 24 * 60 * 60 * 1000;
+        int deletedCount = 0;
+
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss")
+                .withZone(ZoneId.of("UTC"));
+
+        // 3️⃣ Iterate through items
+        for (Map.Entry<String, NewsItem> entry : newsMap.entrySet()) {
+            String id = entry.getKey();
+            NewsItem item = entry.getValue();
+
+            if (item.getDateTime() == null) continue;
+
+            try {
+                Instant itemInstant = Instant.from(formatter.parse(item.getDateTime()));
+                long itemTime = itemInstant.toEpochMilli();
+
+                // 4️⃣ If older than 2 days → DELETE
+                if (now - itemTime > twoDaysMillis) {
+                    String deleteUrl = DB_URL + "movie_news/data/" + id + ".json";
+                    HttpRequest deleteReq = HttpRequest.newBuilder()
+                            .uri(URI.create(deleteUrl))
+                            .DELETE()
+                            .build();
+
+                    HttpResponse<String> deleteRes = client.send(deleteReq, HttpResponse.BodyHandlers.ofString());
+
+                    if (deleteRes.statusCode() == 200) {
+                        System.out.println("🗑️ Deleted old news: " + item.getHead());
+                        deletedCount++;
+                    } else {
+                        System.out.println("⚠️ Failed to delete " + id + ": " + deleteRes.body());
+                    }
+                }
+
+            } catch (Exception e) {
+                System.out.println("❌ Error parsing/deleting: " + e.getMessage());
+            }
+        }
+
+        System.out.println("✅ Cleanup done. Deleted " + deletedCount + " old items.");
+    }
+
 
     public void write(List<NewsItem> items) throws Exception {
         FirebaseInitializer.init();
@@ -43,11 +117,6 @@ public class FirebaseWriter {
 
             item.setId(uniqueId);
             String json = new Gson().toJson(item);
-
-//            try {
-//                ref.child(uniqueId).setValueAsync(json).get(2, TimeUnit.SECONDS); // push each item separately
-//                System.out.println(" News pushed: " + item.getHead());
-//            } catch (Exception e)
 
             try {
                 HttpRequest req = HttpRequest.newBuilder()
@@ -71,6 +140,85 @@ public class FirebaseWriter {
     }
 
 
+    public Map<String, Long> loadSeenArticlesFromFirebase() throws Exception {
+        FirebaseInitializer.init();
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(DB_URL + "seenArticles.json"))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        ObjectMapper mapper = new ObjectMapper();
+        String body = response.body();
+
+        if (body == null || body.equals("null") || body.isBlank()) {
+            System.out.println("No seen articles yet in Firebase.");
+            return new HashMap<>();
+        }
+
+        Map<String, Long> rawMap = mapper.readValue(response.body(), new TypeReference<>() {
+        });
+
+        Map<String, Long> seenArticles = new HashMap<>();
+        for (Map.Entry<String, Long> entry : rawMap.entrySet()) {
+            String decodedUrl = decodeUrl(entry.getKey());
+            seenArticles.put(decodedUrl, entry.getValue());
+        }
+
+        System.out.println("Loaded " + (seenArticles != null ? seenArticles.size() : 0) + " articles from Firebase.");
+        return seenArticles != null ? seenArticles : new HashMap<>();
+    }
+
+
+    public void saveSeenArticleToFirebase(String urlKey) throws Exception {
+        String firebaseDbUrl = DB_URL + "seenArticles/"
+                + encodeUrl(urlKey) + ".json";
+
+        long timestamp = System.currentTimeMillis();
+        String json = String.valueOf(timestamp); // just the number
+
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(firebaseDbUrl))
+                .PUT(HttpRequest.BodyPublishers.ofString(json))
+                .header("Content-Type", "application/json")
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            System.out.println("Saved article: " + urlKey);
+        } else {
+            System.err.println("Failed to save article: " + urlKey + " | HTTP code: " + response.statusCode());
+        }
+    }
+
+    private String encodeUrl(String url) {
+        return Base64.getUrlEncoder().encodeToString(url.getBytes());
+    }
+
+    private String decodeUrl(String encoded) {
+        return new String(Base64.getUrlDecoder().decode(encoded));
+    }
+
+    public boolean isUpcomingPresent() throws IOException, InterruptedException {
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(DB_URL + "upcoming/releases.json"))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        String body = response.body();
+        if (body == null || body.equals("null") || body.isBlank()) {
+            return false;
+        }
+
+        return true;
+    }
+
     public void writeTrailer(List<TrailerItem> items) throws Exception {
         FirebaseInitializer.init();
         DatabaseReference ref = FirebaseDatabase.getInstance().getReference("movie_trailer/data");
@@ -85,7 +233,7 @@ public class FirebaseWriter {
 //                System.out.println(" Trailer pushed: " + item.getTitle());
 //            } catch (Exception e)
 //
-            try{
+            try {
                 HttpRequest req = HttpRequest.newBuilder()
                         .uri(URI.create(url))
                         .header("Content-Type", "application/json")
@@ -98,7 +246,7 @@ public class FirebaseWriter {
                 if (res.statusCode() == 200) {
                     System.out.println(" via api Trailer pushed: -->" + item.getTitle());
                 }
-            }catch (Exception e){
+            } catch (Exception e) {
                 e.printStackTrace();
             }
         }
@@ -133,7 +281,7 @@ public class FirebaseWriter {
 //                System.out.println(" Upcoming pushed: " + item.getMovieName());
 //            } catch (Exception e)
 
-            try{
+            try {
                 HttpRequest req = HttpRequest.newBuilder()
                         .uri(URI.create(url))
                         .header("Content-Type", "application/json")
@@ -146,7 +294,7 @@ public class FirebaseWriter {
                 if (res.statusCode() == 200) {
                     System.out.println(" via api Upcoming pushed: -->" + item.getMovieName());
                 }
-            }catch (Exception e){
+            } catch (Exception e) {
                 e.printStackTrace();
             }
         }
@@ -169,7 +317,7 @@ public class FirebaseWriter {
 //                System.out.println(" Trivia pushed: " + item.getMovie_name());
 //            } catch (Exception e)
 
-            try{
+            try {
                 HttpRequest req = HttpRequest.newBuilder()
                         .uri(URI.create(url))
                         .header("Content-Type", "application/json")
@@ -182,10 +330,11 @@ public class FirebaseWriter {
                 if (res.statusCode() == 200) {
                     System.out.println(" via api Trivia pushed: -->" + item.getMovie_name());
                 }
-            }catch (Exception e){
+            } catch (Exception e) {
 
             }
         }
 
     }
+
 }

@@ -7,8 +7,8 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 
 @Component
 public class FirebaseSchedulers {
@@ -27,6 +27,7 @@ public class FirebaseSchedulers {
             pushTrailers();
             pushUpcoming();
             pushFacts();
+            runDailyCleanup();
         }).start();
     }
 
@@ -35,7 +36,13 @@ public class FirebaseSchedulers {
         String FEED_URLS[] = {"https://screenrant.com/feed/", "https://collider.com/feed/"};
         for (String url : FEED_URLS) {
             runSafely("News", () -> {
-                List<NewsItem> news = generator.runScheduledTask(url);
+                Map<String, Long> existingUrls = null;
+                try {
+                    existingUrls = firebaseWriter.loadSeenArticlesFromFirebase();
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+                List<NewsItem> news = generator.runScheduledTask(url, existingUrls, firebaseWriter);
                 try {
                     if (news != null && !news.isEmpty())
                         firebaseWriter.write(news);
@@ -59,22 +66,40 @@ public class FirebaseSchedulers {
         });
     }
 
-    @Scheduled(fixedRate = 30 * 24 * 60 * 60 * 1000L)
+
     public void pushUpcoming() {
         runSafely("Upcoming", () -> {
             List<Upcoming> upcoming = null;
             try {
+                if (firebaseWriter.isUpcomingPresent())
+                    return;
+
                 upcoming = generator.generateTrailers();
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
             try {
+
                 if (upcoming != null && !upcoming.isEmpty())
                     firebaseWriter.writeUpcoming(upcoming);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         });
+    }
+
+    @Scheduled(cron = "0 0 0 * * *", zone = "UTC")
+    public void runDailyCleanup() {
+
+        runSafely("DailyCleanup", () -> {
+            try {
+                firebaseWriter.deleteOldNews();
+                System.out.println("🧹 Scheduled cleanup completed.");
+            } catch (Exception e) {
+                System.err.println("⚠️ Cleanup failed: " + e.getMessage());
+            }
+        });
+
     }
 
     @Scheduled(fixedRate = 24 * 60 * 60 * 1000L)
@@ -93,16 +118,16 @@ public class FirebaseSchedulers {
     private void runSafely(String taskName, Runnable task) {
         if (SchedulerLock.LOCK.tryLock()) {
             try {
-                System.out.println("🚀 Starting " + taskName + " push...");
+                System.out.println(" Starting " + taskName + " push...");
                 task.run();
-                System.out.println("✅ Completed " + taskName + " push!");
+                System.out.println(" Completed " + taskName + " push!");
             } catch (Exception e) {
                 e.printStackTrace();
             } finally {
                 SchedulerLock.LOCK.unlock();
             }
         } else {
-            System.out.println("⚠️ Skipped " + taskName + " — another task still running");
+            System.out.println(" Skipped " + taskName + " — another task still running");
         }
     }
 

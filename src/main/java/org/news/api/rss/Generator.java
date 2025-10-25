@@ -12,6 +12,7 @@ import com.rometools.rome.feed.synd.SyndFeed;
 import com.rometools.rome.io.SyndFeedInput;
 import com.rometools.rome.io.XmlReader;
 import org.jsoup.Jsoup;
+import org.news.api.firebase.FirebaseWriter;
 import org.news.api.gemini.GeminiService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,7 +62,7 @@ public class Generator {
     }
 
 
-    public List<NewsItem> runScheduledTask(String FEED_URL) {
+    public List<NewsItem> runScheduledTask(String FEED_URL, Map<String,Long> seenArticles, FirebaseWriter firebaseWriter) {
         logger.info("Scheduled task started for {}", FEED_URL);
 
         try {
@@ -69,7 +70,7 @@ public class Generator {
             SyndFeed feed = input.build(new XmlReader(new URL(FEED_URL)));
             List<SyndEntry> entries = feed.getEntries();
 
-            cleanupOldArticles();
+            cleanupOldArticles(seenArticles);
 
             if (entries.isEmpty()) {
                 logger.info("No entries found for {}", FEED_URL);
@@ -85,7 +86,7 @@ public class Generator {
                     continue;
                 }
 
-                seenArticles.put(link, System.currentTimeMillis());
+                firebaseWriter.saveSeenArticleToFirebase(link);
 
                 String html = "";
                 try {
@@ -167,14 +168,19 @@ public class Generator {
     /**
      * 🧹 Removes old entries beyond TTL
      */
-    private void cleanupOldArticles() {
+    private void cleanupOldArticles(Map<String, Long> seenArticles) {
         long now = System.currentTimeMillis();
         seenArticles.entrySet().removeIf(entry -> (now - entry.getValue()) > ARTICLE_TTL_MS);
         logger.debug("Cleaned up old seen articles. Remaining cache size: {}", seenArticles.size());
     }
 
 
+
+
+
+
     public List<Upcoming> generateTrailers() throws Exception {
+
         System.out.println("Starting trailer at " + new Date());
         Calendar cal = Calendar.getInstance();
         SimpleDateFormat sdf = new SimpleDateFormat("MMMM");
