@@ -5,6 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.reflect.TypeToken;
 import com.google.firebase.database.*;
 import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.news.api.rss.NewsItem;
 import org.news.api.rss.TrailerItem;
 import org.news.api.rss.Trivia;
@@ -28,6 +31,9 @@ import java.util.concurrent.TimeUnit;
 public class FirebaseWriter {
     private static final String DB_URL =
             "https://cinepulse-54397-default-rtdb.asia-southeast1.firebasedatabase.app/";
+    private static final long TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000L;
+
+
 
 
     public void deleteOldNews() throws Exception {
@@ -171,6 +177,48 @@ public class FirebaseWriter {
         return seenArticles != null ? seenArticles : new HashMap<>();
     }
 
+    public  void cleanupOldSeenArticles() throws Exception {
+        String firebaseDbUrl = DB_URL + "seenArticles.json";
+        HttpClient client = HttpClient.newHttpClient();
+
+        // Step 1: Fetch all seen articles
+        HttpRequest getRequest = HttpRequest.newBuilder()
+                .uri(URI.create(firebaseDbUrl))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = client.send(getRequest, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) {
+            System.err.println("Failed to fetch data: " + response.statusCode());
+            return;
+        }
+
+        // Step 2: Parse JSON
+        JsonObject allArticles = JsonParser.parseString(response.body()).getAsJsonObject();
+        if (allArticles == null) {
+            System.out.println("No data found.");
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        int deleted = 0;
+
+        // Step 3: Loop + delete old entries
+        for (Map.Entry<String, JsonElement> entry : allArticles.entrySet()) {
+            long ts = entry.getValue().getAsLong();
+            if (now - ts > TWO_DAYS_MS) {
+                String delUrl = DB_URL + "seenArticles/" + entry.getKey() + ".json";
+                HttpRequest delRequest = HttpRequest.newBuilder()
+                        .uri(URI.create(delUrl))
+                        .DELETE()
+                        .build();
+                client.send(delRequest, HttpResponse.BodyHandlers.discarding());
+                deleted++;
+            }
+        }
+
+        System.out.println("Cleanup done ✅ Deleted " + deleted + " old entries.");
+    }
 
     public void saveSeenArticleToFirebase(String urlKey) throws Exception {
         String firebaseDbUrl = DB_URL + "seenArticles/"

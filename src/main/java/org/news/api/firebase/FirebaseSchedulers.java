@@ -94,6 +94,7 @@ public class FirebaseSchedulers {
         runSafely("DailyCleanup", () -> {
             try {
                 firebaseWriter.deleteOldNews();
+                firebaseWriter.cleanupOldSeenArticles();
                 System.out.println("🧹 Scheduled cleanup completed.");
             } catch (Exception e) {
                 System.err.println("⚠️ Cleanup failed: " + e.getMessage());
