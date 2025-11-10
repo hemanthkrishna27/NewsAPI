@@ -177,6 +177,84 @@ public class FirebaseWriter {
         return seenArticles != null ? seenArticles : new HashMap<>();
     }
 
+
+
+    public Map<String, Long> loadSeenTrailersFromFirebase() throws Exception {
+        FirebaseInitializer.init();
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(DB_URL + "seenTrailers.json"))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        ObjectMapper mapper = new ObjectMapper();
+        String body = response.body();
+
+        if (body == null || body.equals("null") || body.isBlank()) {
+            System.out.println("No seen trailers yet in Firebase.");
+            return new HashMap<>();
+        }
+
+        Map<String, Long> rawMap = mapper.readValue(response.body(), new TypeReference<>() {
+        });
+
+        Map<String, Long> seenTrailers = new HashMap<>();
+        for (Map.Entry<String, Long> entry : rawMap.entrySet()) {
+            String decodedUrl = decodeUrl(entry.getKey());
+            seenTrailers.put(decodedUrl, entry.getValue());
+        }
+
+        System.out.println("Loaded " + (seenTrailers != null ? seenTrailers.size() : 0) + " trailers from Firebase.");
+        return seenTrailers != null ? seenTrailers : new HashMap<>();
+    }
+
+
+    public  void cleanupOldSeenTrailers() throws Exception {
+        String firebaseDbUrl = DB_URL + "seenTrailers.json";
+        HttpClient client = HttpClient.newHttpClient();
+
+        // Step 1: Fetch all seen articles
+        HttpRequest getRequest = HttpRequest.newBuilder()
+                .uri(URI.create(firebaseDbUrl))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = client.send(getRequest, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) {
+            System.err.println("Failed to fetch data: " + response.statusCode());
+            return;
+        }
+
+        // Step 2: Parse JSON
+        JsonObject allArticles = JsonParser.parseString(response.body()).getAsJsonObject();
+        if (allArticles == null) {
+            System.out.println("No data found.");
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        int deleted = 0;
+
+        // Step 3: Loop + delete old entries
+        for (Map.Entry<String, JsonElement> entry : allArticles.entrySet()) {
+            long ts = entry.getValue().getAsLong();
+            if (now - ts > TWO_DAYS_MS) {
+                String delUrl = DB_URL + "seenTrailers/" + entry.getKey() + ".json";
+                HttpRequest delRequest = HttpRequest.newBuilder()
+                        .uri(URI.create(delUrl))
+                        .DELETE()
+                        .build();
+                client.send(delRequest, HttpResponse.BodyHandlers.discarding());
+                deleted++;
+            }
+        }
+
+        System.out.println("Cleanup done ✅ Deleted " + deleted + " old trailers in Firebase.");
+    }
+
+
     public  void cleanupOldSeenArticles() throws Exception {
         String firebaseDbUrl = DB_URL + "seenArticles.json";
         HttpClient client = HttpClient.newHttpClient();
@@ -217,7 +295,7 @@ public class FirebaseWriter {
             }
         }
 
-        System.out.println("Cleanup done ✅ Deleted " + deleted + " old entries.");
+        System.out.println("Cleanup done ✅ Deleted " + deleted + " old articles in Firebase.");
     }
 
     public void saveSeenArticleToFirebase(String urlKey) throws Exception {
@@ -240,6 +318,31 @@ public class FirebaseWriter {
             System.out.println("Saved article: " + urlKey);
         } else {
             System.err.println("Failed to save article: " + urlKey + " | HTTP code: " + response.statusCode());
+        }
+    }
+
+
+
+    public void saveSeenTrailersToFirebase(String urlKey) throws Exception {
+        String firebaseDbUrl = DB_URL + "seenTrailers/"
+                + encodeUrl(urlKey) + ".json";
+
+        long timestamp = System.currentTimeMillis();
+        String json = String.valueOf(timestamp); // just the number
+
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(firebaseDbUrl))
+                .PUT(HttpRequest.BodyPublishers.ofString(json))
+                .header("Content-Type", "application/json")
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            System.out.println("Saved trailer: " + urlKey);
+        } else {
+            System.err.println("Failed to save trailer: " + urlKey + " | HTTP code: " + response.statusCode());
         }
     }
 

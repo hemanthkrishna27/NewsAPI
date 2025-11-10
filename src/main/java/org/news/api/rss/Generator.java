@@ -62,7 +62,7 @@ public class Generator {
     }
 
 
-    public List<NewsItem> runScheduledTask(String FEED_URL, Map<String,Long> seenArticles, FirebaseWriter firebaseWriter) {
+    public List<NewsItem> runScheduledTask(String FEED_URL, Map<String, Long> seenArticles, FirebaseWriter firebaseWriter) {
         logger.info("Scheduled task started for {}", FEED_URL);
 
         try {
@@ -173,10 +173,6 @@ public class Generator {
         seenArticles.entrySet().removeIf(entry -> (now - entry.getValue()) > ARTICLE_TTL_MS);
         logger.debug("Cleaned up old seen articles. Remaining cache size: {}", seenArticles.size());
     }
-
-
-
-
 
 
     public List<Upcoming> generateTrailers() throws Exception {
@@ -295,7 +291,7 @@ public class Generator {
     }
 
 
-    public List<TrailerItem> generateActTrailers() {
+    public List<TrailerItem> generateActTrailers(Map<String, Long> seenTrailers,FirebaseWriter firebaseWriter) {
 
         System.out.println("Running trailer scheduler");
         String rssUrl = "https://www.moviefone.com/feeds/movie-trailers.rss";
@@ -315,14 +311,20 @@ public class Generator {
                     Element element = (Element) node;
                     String title = element.getElementsByTagName("title").item(0).getTextContent().trim();
                     String trailerUrl = element.getElementsByTagName("guid").item(0).getTextContent().trim();
+                    if (trailerUrl == null || seenTrailers.containsKey(trailerUrl)) {
+                        logger.debug("Skipping duplicate or invalid entry: {}", title);
+                        continue;
+                    }
+
+                    firebaseWriter.saveSeenTrailersToFirebase(trailerUrl);
+
                     String description = element.getElementsByTagName("description").item(0).getTextContent().trim();
                     Element enclosure = (Element) element.getElementsByTagName("enclosure").item(0);
                     String imgUrl = enclosure.getAttribute("url");
 
-                    if (!seenTrailers.containsKey(trailerUrl)) {
-                        trailers.add(new TrailerItem(title, imgUrl, trailerUrl, description));
-                        seenTrailers.put(trailerUrl, System.currentTimeMillis());
-                    }
+                    trailers.add(new TrailerItem(title, imgUrl, trailerUrl, description));
+                    seenTrailers.put(trailerUrl, System.currentTimeMillis());
+
 
                 }
             }

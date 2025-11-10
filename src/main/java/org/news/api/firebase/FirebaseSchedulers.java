@@ -56,7 +56,13 @@ public class FirebaseSchedulers {
     @Scheduled(fixedRate = 24 * 60 * 60 * 1000L)
     public void pushTrailers() {
         runSafely("Trailer", () -> {
-            List<TrailerItem> trailers = generator.generateActTrailers();
+            Map<String, Long> existingUrls = null;
+            try {
+                existingUrls = firebaseWriter.loadSeenTrailersFromFirebase();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+            List<TrailerItem> trailers = generator.generateActTrailers(existingUrls,firebaseWriter);
             try {
                 if (trailers != null && !trailers.isEmpty())
                     firebaseWriter.writeTrailer(trailers);
@@ -95,6 +101,7 @@ public class FirebaseSchedulers {
             try {
                 firebaseWriter.deleteOldNews();
                 firebaseWriter.cleanupOldSeenArticles();
+                firebaseWriter.cleanupOldSeenTrailers();
                 System.out.println("🧹 Scheduled cleanup completed.");
             } catch (Exception e) {
                 System.err.println("⚠️ Cleanup failed: " + e.getMessage());
