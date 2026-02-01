@@ -28,6 +28,8 @@ public class FirebaseSchedulers {
             pushUpcoming();
             pushFacts();
             runDailyCleanup();
+            runDailyRecommendations();
+
         }).start();
     }
 
@@ -137,6 +139,20 @@ public class FirebaseSchedulers {
         } else {
             System.out.println(" Skipped " + taskName + " — another task still running");
         }
+    }
+
+        @Scheduled(cron = "0 0 0 * * *", zone = "UTC")
+    public void runDailyRecommendations() {
+
+        runSafely("DailyRecommendations", () -> {
+            try {
+                firebaseWriter.addRecommendations();
+                System.out.println(" Scheduled cleanup + new recommedations addeed");
+            } catch (Exception e) {
+                System.err.println(" Cleanup failed + addition: " + e.getMessage());
+            }
+        });
+
     }
 
 

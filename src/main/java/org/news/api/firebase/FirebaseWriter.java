@@ -8,6 +8,9 @@ import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.news.api.model.RapidMedia;
+import org.news.api.model.Recommendations;
+import org.news.api.rapidapi.DailyRecommedationRapidApiConnector;
 import org.news.api.rss.NewsItem;
 import org.news.api.rss.TrailerItem;
 import org.news.api.rss.Trivia;
@@ -34,6 +37,67 @@ public class FirebaseWriter {
     private static final long TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000L;
 
 
+
+    public void addRecommendations() throws IOException, InterruptedException {
+
+        String url = DB_URL + "daily_recommendations/data.json";
+
+        HttpClient client = HttpClient.newHttpClient();
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .DELETE()
+                .build();
+
+        HttpResponse<String> response =
+                client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        System.out.println("Status Code: " + response.statusCode());
+        System.out.println("Response Body: " + response.body());
+
+
+
+        //once del;ete is complete post actual data
+
+        DailyRecommedationRapidApiConnector connector=new DailyRecommedationRapidApiConnector();
+       RapidMedia media=connector.getRecommendation();
+
+       for(Recommendations item: media.getRecommendations()){
+
+
+
+               String uniqueId = java.util.UUID.randomUUID().toString();
+
+
+               item.setId(uniqueId);
+               String json = new Gson().toJson(item);
+
+               try {
+                   HttpRequest req = HttpRequest.newBuilder()
+                           .uri(URI.create(url))
+                           .header("Content-Type", "application/json")
+                           .POST(HttpRequest.BodyPublishers.ofString(json))
+                           .build();
+
+                   HttpResponse<String> res = HttpClient.newHttpClient()
+                           .send(req, HttpResponse.BodyHandlers.ofString());
+
+                   if (res.statusCode() == 200) {
+                       System.out.println(" via api recommedations pushed: -->" + item.getTitle());
+                   }
+               } catch (Exception e) {
+                   System.out.println(" Failed to recommedations pushed news: -->" + item.getTitle());
+                   e.printStackTrace();
+               }
+
+
+
+
+
+       }
+
+
+    }
 
 
     public void deleteOldNews() throws Exception {
