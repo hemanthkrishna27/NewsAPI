@@ -16,18 +16,16 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.List;
 
-@Service
+
 public class DailyRecommedationRapidApiConnector {
 
 
-//    @Value("${rapid.api.key}")
-//    private String API_KEY;
 
 
-    public RapidMedia getRecommendation() throws IOException, InterruptedException {
+    public RapidMedia getRecommendation(String API_KEY) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create("https://rottentomato.p.rapidapi.com/today-recomendations"))
-                .header("x-rapidapi-key", "4cb0ef4b3fmsh76a65997c80f418p126718jsnef65e4c57d6b")
+                .header("x-rapidapi-key", API_KEY)
                 .header("x-rapidapi-host", "rottentomato.p.rapidapi.com")
                 .GET()
                 .build();

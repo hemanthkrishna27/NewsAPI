@@ -15,6 +15,8 @@ import org.news.api.rss.NewsItem;
 import org.news.api.rss.TrailerItem;
 import org.news.api.rss.Trivia;
 import org.news.api.rss.Upcoming;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.lang.reflect.Type;
@@ -31,14 +33,14 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
+
 public class FirebaseWriter {
     private static final String DB_URL =
             "https://cinepulse-54397-default-rtdb.asia-southeast1.firebasedatabase.app/";
     private static final long TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000L;
 
 
-
-    public void addRecommendations() throws IOException, InterruptedException {
+    public void addRecommendations(String API_KEY) throws IOException, InterruptedException {
 
         String url = DB_URL + "daily_recommendations/data.json";
 
@@ -56,45 +58,39 @@ public class FirebaseWriter {
         System.out.println("Response Body: " + response.body());
 
 
-
         //once del;ete is complete post actual data
+        DailyRecommedationRapidApiConnector connector = new DailyRecommedationRapidApiConnector();
+        RapidMedia media = connector.getRecommendation(API_KEY);
 
-        DailyRecommedationRapidApiConnector connector=new DailyRecommedationRapidApiConnector();
-       RapidMedia media=connector.getRecommendation();
-
-       for(Recommendations item: media.getRecommendations()){
-
+        for (Recommendations item : media.getRecommendations()) {
 
 
-               String uniqueId = java.util.UUID.randomUUID().toString();
+            String uniqueId = java.util.UUID.randomUUID().toString();
 
 
-               item.setId(uniqueId);
-               String json = new Gson().toJson(item);
+            item.setId(uniqueId);
+            String json = new Gson().toJson(item);
 
-               try {
-                   HttpRequest req = HttpRequest.newBuilder()
-                           .uri(URI.create(url))
-                           .header("Content-Type", "application/json")
-                           .POST(HttpRequest.BodyPublishers.ofString(json))
-                           .build();
+            try {
+                HttpRequest req = HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(json))
+                        .build();
 
-                   HttpResponse<String> res = HttpClient.newHttpClient()
-                           .send(req, HttpResponse.BodyHandlers.ofString());
+                HttpResponse<String> res = HttpClient.newHttpClient()
+                        .send(req, HttpResponse.BodyHandlers.ofString());
 
-                   if (res.statusCode() == 200) {
-                       System.out.println(" via api recommedations pushed: -->" + item.getTitle());
-                   }
-               } catch (Exception e) {
-                   System.out.println(" Failed to recommedations pushed news: -->" + item.getTitle());
-                   e.printStackTrace();
-               }
-
-
+                if (res.statusCode() == 200) {
+                    System.out.println(" via api recommedations pushed: -->" + item.getTitle());
+                }
+            } catch (Exception e) {
+                System.out.println(" Failed to recommedations pushed news: -->" + item.getTitle());
+                e.printStackTrace();
+            }
 
 
-
-       }
+        }
 
 
     }
@@ -117,7 +113,8 @@ public class FirebaseWriter {
         }
 
         // 2️⃣ Parse JSON into a map
-        Type type = new TypeToken<Map<String, NewsItem>>() {}.getType();
+        Type type = new TypeToken<Map<String, NewsItem>>() {
+        }.getType();
         Map<String, NewsItem> newsMap = new Gson().fromJson(getRes.body(), type);
 
         if (newsMap == null || newsMap.isEmpty()) {
@@ -242,7 +239,6 @@ public class FirebaseWriter {
     }
 
 
-
     public Map<String, Long> loadSeenTrailersFromFirebase() throws Exception {
         FirebaseInitializer.init();
         HttpClient client = HttpClient.newHttpClient();
@@ -275,7 +271,7 @@ public class FirebaseWriter {
     }
 
 
-    public  void cleanupOldSeenTrailers() throws Exception {
+    public void cleanupOldSeenTrailers() throws Exception {
         String firebaseDbUrl = DB_URL + "seenTrailers.json";
         HttpClient client = HttpClient.newHttpClient();
 
@@ -319,7 +315,7 @@ public class FirebaseWriter {
     }
 
 
-    public  void cleanupOldSeenArticles() throws Exception {
+    public void cleanupOldSeenArticles() throws Exception {
         String firebaseDbUrl = DB_URL + "seenArticles.json";
         HttpClient client = HttpClient.newHttpClient();
 
@@ -384,7 +380,6 @@ public class FirebaseWriter {
             System.err.println("Failed to save article: " + urlKey + " | HTTP code: " + response.statusCode());
         }
     }
-
 
 
     public void saveSeenTrailersToFirebase(String urlKey) throws Exception {
@@ -468,53 +463,53 @@ public class FirebaseWriter {
 
     }
 
-    public void writeUpcoming(List<Upcoming> items) throws Exception {
-        FirebaseInitializer.init();
-        DatabaseReference ref = FirebaseDatabase.getInstance().getReference("upcoming/releases");
+//    public void writeUpcoming(List<Upcoming> items) throws Exception {
+//        FirebaseInitializer.init();
+//        DatabaseReference ref = FirebaseDatabase.getInstance().getReference("upcoming/releases");
+//
+//
+//        for (Upcoming item : items) {
+//            String uniqueId = java.util.UUID.randomUUID().toString();
+//            String url = DB_URL + "upcoming/releases" + ".json";
+//            String videoId = "";
+//            String trailer_url = item.getTrailerUrl();
+//
+//            if (trailer_url != null && trailer_url.contains("v=")) {
+//                videoId = trailer_url.substring(trailer_url.indexOf("v=") + 2);
+//                int ampIndex = videoId.indexOf('&');
+//                if (ampIndex != -1) {
+//                    videoId = videoId.substring(0, ampIndex);
+//                }
+//            }
+//            item.setTrailerUrl(videoId);
+//
+//            String json = new Gson().toJson(item);
+//
 
-
-        for (Upcoming item : items) {
-            String uniqueId = java.util.UUID.randomUUID().toString();
-            String url = DB_URL + "upcoming/releases" + ".json";
-            String videoId = "";
-            String trailer_url = item.getTrailerUrl();
-
-            if (trailer_url != null && trailer_url.contains("v=")) {
-                videoId = trailer_url.substring(trailer_url.indexOf("v=") + 2);
-                int ampIndex = videoId.indexOf('&');
-                if (ampIndex != -1) {
-                    videoId = videoId.substring(0, ampIndex);
-                }
-            }
-            item.setTrailerUrl(videoId);
-
-            String json = new Gson().toJson(item);
-
+    /// /            try {
+    /// /                ref.child(uniqueId).setValueAsync(item).get(2, TimeUnit.SECONDS);
+    /// /                ; // push each item separately
+    /// /                System.out.println(" Upcoming pushed: " + item.getMovieName());
+    /// /            } catch (Exception e)
+//
 //            try {
-//                ref.child(uniqueId).setValueAsync(item).get(2, TimeUnit.SECONDS);
-//                ; // push each item separately
-//                System.out.println(" Upcoming pushed: " + item.getMovieName());
-//            } catch (Exception e)
-
-            try {
-                HttpRequest req = HttpRequest.newBuilder()
-                        .uri(URI.create(url))
-                        .header("Content-Type", "application/json")
-                        .POST(HttpRequest.BodyPublishers.ofString(json))
-                        .build();
-
-                HttpResponse<String> res = HttpClient.newHttpClient()
-                        .send(req, HttpResponse.BodyHandlers.ofString());
-
-                if (res.statusCode() == 200) {
-                    System.out.println(" via api Upcoming pushed: -->" + item.getMovieName());
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-    }
-
+//                HttpRequest req = HttpRequest.newBuilder()
+//                        .uri(URI.create(url))
+//                        .header("Content-Type", "application/json")
+//                        .POST(HttpRequest.BodyPublishers.ofString(json))
+//                        .build();
+//
+//                HttpResponse<String> res = HttpClient.newHttpClient()
+//                        .send(req, HttpResponse.BodyHandlers.ofString());
+//
+//                if (res.statusCode() == 200) {
+//                    System.out.println(" via api Upcoming pushed: -->" + item.getMovieName());
+//                }
+//            } catch (Exception e) {
+//                e.printStackTrace();
+//            }
+//        }
+//    }
     public void writeFacts(List<Trivia> items) throws Exception {
         FirebaseInitializer.init();
         DatabaseReference ref = FirebaseDatabase.getInstance().getReference("trivia/data");
